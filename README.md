@@ -64,6 +64,54 @@ vanillapm mydb.data -k mykeys.key
 vanillapm old.data migrate new.data
 ```
 
+## Security model
+
+VanillaPM uses a layered encryption scheme. Understanding the threat model
+helps you decide whether the defaults are sufficient for your use case.
+
+### How data is protected (v2 format)
+
+1. **Master password** → PBKDF2-HMAC-SHA256 (600 000 iterations, 32-byte random salt) → **AES-256 key**
+2. AES-256-CBC encrypts the RSA private key and HMAC key at rest.
+3. Each credential (site, account, password) is individually encrypted with **RSA-8192 OAEP** plus a 333-byte random salt.
+4. Site names are indexed via **HMAC-SHA256** so exact-match queries work without decrypting every row.
+
+### If your database files are leaked (without the master password)
+
+An attacker who obtains the `.data` (and `.key`) files but **not** the master
+password can only recover credentials by brute-forcing the password through
+PBKDF2. The KDF salt and encrypted private key stored in the database give
+them a clear verification oracle (valid PEM = correct guess).
+
+Rough brute-force estimates (single RTX 4090-class GPU, ~3 000 guesses/sec):
+
+| Password strength | Time to crack |
+| --- | --- |
+| Top-1M dictionary word | **~minutes** |
+| 8-char random alphanumeric | **~1 400 years** |
+| 16+ char random passphrase | **effectively infeasible** |
+
+**Your security is exactly as strong as your master password.**
+
+### Separate key database (`-k`) as defense-in-depth
+
+When you use `-k mykeys.key`, all cryptographic keys (KDF salt, encrypted
+private key, HMAC key, public key) are stored in a separate SQLite file. If
+**only** the `.data` file leaks, the attacker has nothing but RSA-OAEP
+ciphertext blobs — no material to brute-force against. Storing the two files
+in different locations (e.g. different cloud providers) meaningfully reduces
+risk.
+
+### Recommendations
+
+- Use a **strong, unique master password** (16+ characters or a multi-word passphrase).
+- Prefer `--ask-password` or the `VANILLAPM_PASSWORD` env var over `-p` on the command line — CLI arguments are visible in `ps` output and shell history.
+- Consider using the separate key database (`-k`) and storing the key file separately from the data file.
+
+### TODO
+
+- [ ] **Switch from PBKDF2 to Argon2id** — PBKDF2 is GPU-friendly, meaning attackers can parallelise brute-force attempts cheaply. Argon2id is memory-hard, making each guess ~10–100× more expensive on GPUs. This is the single most impactful improvement for the leaked-database threat model.
+
 ## License
 
 This project does not currently specify a license.
