@@ -200,7 +200,6 @@ impl SQLiteManager {
         Ok(password)
     }
 
-    #[cfg(test)]
     /// Initialize a new v2 database with the given password (non-interactive).
     /// Used by tests and by `new_init_with_passwd`.
     fn init_db_with_passwd(
@@ -255,7 +254,6 @@ impl SQLiteManager {
         Ok(())
     }
 
-    #[cfg(test)]
     /// Create a brand-new v2 database initialized with the given password (non-interactive).
     /// This is useful for tests and for the migration path where the password is already known.
     pub fn new_init_with_passwd(

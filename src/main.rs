@@ -124,6 +124,9 @@ macro_rules! define_cmd {
                 /// Optional separate key database for the new v2 database
                 #[clap(long = "new-key-db")]
                 new_key_db: Option<String>,
+                /// Prompt for a new password instead of reusing the old one
+                #[clap(long = "renew-password")]
+                renew_password: bool,
             },
             $(#[command()]
             $sub_cmd {
@@ -167,6 +170,7 @@ fn do_migrate(
     old_key_db: &Option<String>,
     new_db: &str,
     new_key_db: &Option<String>,
+    renew_password: bool,
 ) -> Result<(), Box<dyn Error>> {
     println!("=== VanillaPM Database Migration (v1 -> v2) ===");
     println!("Old database: {}", old_db);
@@ -179,11 +183,17 @@ fn do_migrate(
     let items = old_mgr.read_all()?;
     println!("Read {} items from old database.", items.len());
 
-    // Create new v2 database (will prompt for new password via init_db)
+    // Create new v2 database
     println!("\nSetting up new database...");
-    let new_mgr = SQLiteManager::new(new_db, new_key_db)?;
-    new_mgr.batch_add(&items)?;
-    new_mgr.finish()?;
+    if renew_password {
+        let new_mgr = SQLiteManager::new(new_db, new_key_db)?;
+        new_mgr.batch_add(&items)?;
+        new_mgr.finish()?;
+    } else {
+        let new_mgr = SQLiteManager::new_init_with_passwd(new_db, new_key_db, &old_password)?;
+        new_mgr.batch_add(&items)?;
+        new_mgr.finish()?;
+    }
     println!(
         "\nMigration complete! {} items migrated successfully.",
         items.len()
@@ -259,9 +269,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Command::Migrate {
         ref new_db,
         ref new_key_db,
+        renew_password,
     } = args.command
     {
-        return do_migrate(&args.db, &args.key_db, new_db, new_key_db);
+        return do_migrate(&args.db, &args.key_db, new_db, new_key_db, renew_password);
     }
 
     match args.engine {
