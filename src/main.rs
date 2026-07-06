@@ -137,6 +137,15 @@ macro_rules! define_cmd {
                 #[clap(long = "source-key-db")]
                 source_key_db: Option<String>,
             },
+            /// Compare two v2 databases, showing items only in each side.
+            #[command()]
+            Diff {
+                /// Other database to compare against
+                other_db: String,
+                /// Optional separate key database for the other database
+                #[clap(long = "other-key-db")]
+                other_key_db: Option<String>,
+            },
             $(#[command()]
             $sub_cmd {
                 #[clap(short = 'p', long = "password", group="passwd")]
@@ -281,6 +290,90 @@ fn do_import(
     Ok(())
 }
 
+fn do_diff(
+    db_a: &str,
+    key_db_a: &Option<String>,
+    db_b: &str,
+    key_db_b: &Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    use std::collections::HashSet;
+
+    println!("=== VanillaPM Diff ===");
+    println!("A: {}", db_a);
+    println!("B: {}", db_b);
+    println!();
+
+    // Open database A
+    let mgr_a = retry_guard(
+        || {
+            let pw = rpassword::prompt_password("Password for A>")?;
+            SQLiteManager::new_with_passwd(db_a, key_db_a, &pw)
+        },
+        |_| "password error".to_string(),
+    )?;
+    let items_a = mgr_a.get_all_items()?.unwrap_or_default();
+
+    // Open database B
+    let mgr_b = retry_guard(
+        || {
+            let pw = rpassword::prompt_password("Password for B>")?;
+            SQLiteManager::new_with_passwd(db_b, key_db_b, &pw)
+        },
+        |_| "password error".to_string(),
+    )?;
+    let items_b = mgr_b.get_all_items()?.unwrap_or_default();
+
+    // Build sets keyed by (site, account, password)
+    let set_a: HashSet<(String, String, String)> = items_a
+        .iter()
+        .map(|item| (item.site.clone(), item.account.clone(), item.password.clone()))
+        .collect();
+    let set_b: HashSet<(String, String, String)> = items_b
+        .iter()
+        .map(|item| (item.site.clone(), item.account.clone(), item.password.clone()))
+        .collect();
+
+    let only_a: Vec<&Item> = items_a
+        .iter()
+        .filter(|item| {
+            let key = (item.site.clone(), item.account.clone(), item.password.clone());
+            !set_b.contains(&key)
+        })
+        .collect();
+    let only_b: Vec<&Item> = items_b
+        .iter()
+        .filter(|item| {
+            let key = (item.site.clone(), item.account.clone(), item.password.clone());
+            !set_a.contains(&key)
+        })
+        .collect();
+    let in_common = set_a.intersection(&set_b).count();
+
+    if !only_a.is_empty() {
+        println!("--- Only in A ({} items) ---", only_a.len());
+        for item in &only_a {
+            println!("{}\t{}\t{}", item.site, item.account, item.password);
+        }
+        println!();
+    }
+
+    if !only_b.is_empty() {
+        println!("--- Only in B ({} items) ---", only_b.len());
+        for item in &only_b {
+            println!("{}\t{}\t{}", item.site, item.account, item.password);
+        }
+        println!();
+    }
+
+    println!(
+        "=== Summary: {} only in A, {} only in B, {} in common ===",
+        only_a.len(),
+        only_b.len(),
+        in_common
+    );
+    Ok(())
+}
+
 fn do_main<T: DataManager>(args: Argument) -> Result<(), Box<dyn Error>> {
     let env_password = std::env::vars().find(|(k, _)| k == "VANILLAPM_PASSWORD");
 
@@ -360,6 +453,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     } = args.command
     {
         return do_import(&args.db, &args.key_db, source_db, source_key_db);
+    }
+    if let Command::Diff {
+        ref other_db,
+        ref other_key_db,
+    } = args.command
+    {
+        return do_diff(&args.db, &args.key_db, other_db, other_key_db);
     }
 
     match args.engine {
