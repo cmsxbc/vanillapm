@@ -333,34 +333,39 @@ fn do_diff(
         .map(|item| (item.site.clone(), item.account.clone(), item.password.clone()))
         .collect();
 
-    let only_a: Vec<&Item> = items_a
-        .iter()
-        .filter(|item| {
-            let key = (item.site.clone(), item.account.clone(), item.password.clone());
-            !set_b.contains(&key)
-        })
-        .collect();
-    let only_b: Vec<&Item> = items_b
-        .iter()
-        .filter(|item| {
-            let key = (item.site.clone(), item.account.clone(), item.password.clone());
-            !set_a.contains(&key)
-        })
-        .collect();
+    let only_a: Vec<&(String, String, String)> = set_a.difference(&set_b).collect();
+    let only_b: Vec<&(String, String, String)> = set_b.difference(&set_a).collect();
     let in_common = set_a.intersection(&set_b).count();
+
+    if items_a.len() != set_a.len() {
+        println!(
+            "Note: A has {} internal duplicates ({} raw items, {} unique).",
+            items_a.len() - set_a.len(),
+            items_a.len(),
+            set_a.len()
+        );
+    }
+    if items_b.len() != set_b.len() {
+        println!(
+            "Note: B has {} internal duplicates ({} raw items, {} unique).",
+            items_b.len() - set_b.len(),
+            items_b.len(),
+            set_b.len()
+        );
+    }
 
     if !only_a.is_empty() {
         println!("--- Only in A ({} items) ---", only_a.len());
-        for item in &only_a {
-            println!("{}\t{}\t{}", item.site, item.account, item.password);
+        for (site, account, password) in &only_a {
+            println!("{}\t{}\t{}", site, account, password);
         }
         println!();
     }
 
     if !only_b.is_empty() {
         println!("--- Only in B ({} items) ---", only_b.len());
-        for item in &only_b {
-            println!("{}\t{}\t{}", item.site, item.account, item.password);
+        for (site, account, password) in &only_b {
+            println!("{}\t{}\t{}", site, account, password);
         }
         println!();
     }
