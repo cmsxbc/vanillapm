@@ -359,7 +359,7 @@ impl SQLiteManager {
         Ok(Some(items))
     }
 
-    fn get_all_items(&self) -> Result<Option<Vec<Item>>, Box<dyn Error>> {
+    pub fn get_all_items(&self) -> Result<Option<Vec<Item>>, Box<dyn Error>> {
         let cursor = self
             .connection
             .prepare("SELECT sh, s, a, p FROM data")?
