@@ -128,6 +128,15 @@ macro_rules! define_cmd {
                 #[clap(long = "renew-password")]
                 renew_password: bool,
             },
+            /// Import credentials from another v2 database, skipping duplicates.
+            #[command()]
+            Import {
+                /// Source database to import from
+                source_db: String,
+                /// Optional separate key database for the source
+                #[clap(long = "source-key-db")]
+                source_key_db: Option<String>,
+            },
             $(#[command()]
             $sub_cmd {
                 #[clap(short = 'p', long = "password", group="passwd")]
@@ -201,6 +210,77 @@ fn do_migrate(
     Ok(())
 }
 
+fn do_import(
+    target_db: &str,
+    target_key_db: &Option<String>,
+    source_db: &str,
+    source_key_db: &Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    use std::collections::HashSet;
+
+    println!("=== VanillaPM Import (v2 -> v2) ===");
+    println!("Source: {}", source_db);
+    println!("Target: {}", target_db);
+    println!();
+
+    // Open source database
+    let source_mgr = retry_guard(
+        || {
+            let source_pw = rpassword::prompt_password("Source database password>")?;
+            SQLiteManager::new_with_passwd(source_db, source_key_db, &source_pw)
+        },
+        |_| "password error".to_string(),
+    )?;
+
+    let source_items = source_mgr
+        .get_all_items()?
+        .unwrap_or_default();
+    println!("Read {} items from source database.", source_items.len());
+
+    if source_items.is_empty() {
+        println!("Nothing to import.");
+        return Ok(());
+    }
+
+    // Open target database
+    let target_mgr = retry_guard(
+        || {
+            let target_pw = rpassword::prompt_password("Target database password>")?;
+            SQLiteManager::new_with_passwd(target_db, target_key_db, &target_pw)
+        },
+        |_| "password error".to_string(),
+    )?;
+
+    let existing_items = target_mgr
+        .get_all_items()?
+        .unwrap_or_default();
+
+    // Build dedup set: (site, account, password)
+    let existing_set: HashSet<(String, String, String)> = existing_items
+        .iter()
+        .map(|item| (item.site.clone(), item.account.clone(), item.password.clone()))
+        .collect();
+
+    let mut imported = 0;
+    let mut skipped = 0;
+    for item in &source_items {
+        let key = (item.site.clone(), item.account.clone(), item.password.clone());
+        if existing_set.contains(&key) {
+            skipped += 1;
+        } else {
+            target_mgr.add(item)?;
+            imported += 1;
+        }
+    }
+
+    target_mgr.finish()?;
+    println!(
+        "Imported {} items, skipped {} duplicates.",
+        imported, skipped
+    );
+    Ok(())
+}
+
 fn do_main<T: DataManager>(args: Argument) -> Result<(), Box<dyn Error>> {
     let env_password = std::env::vars().find(|(k, _)| k == "VANILLAPM_PASSWORD");
 
@@ -265,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-    // Handle migrate command before dispatching to engine-specific do_main
+    // Handle migrate and import commands before dispatching to engine-specific do_main
     if let Command::Migrate {
         ref new_db,
         ref new_key_db,
@@ -273,6 +353,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     } = args.command
     {
         return do_migrate(&args.db, &args.key_db, new_db, new_key_db, renew_password);
+    }
+    if let Command::Import {
+        ref source_db,
+        ref source_key_db,
+    } = args.command
+    {
+        return do_import(&args.db, &args.key_db, source_db, source_key_db);
     }
 
     match args.engine {
