@@ -219,6 +219,31 @@ fn do_migrate(
     Ok(())
 }
 
+fn read_all_from_any_db(
+    filepath: &str,
+    key_filepath: &Option<String>,
+    password: &str,
+) -> Result<Vec<Item>, Box<dyn Error>> {
+    let conn = sqlite::open(filepath)?;
+    let temp_conn;
+    let key_conn = if let Some(k) = key_filepath {
+        temp_conn = sqlite::open(k)?;
+        &temp_conn
+    } else {
+        &conn
+    };
+
+    if SQLiteManager::is_legacy(key_conn) {
+        let mgr = SQLiteLegacyManager::new_with_passwd(filepath, key_filepath, password)?;
+        mgr.read_all()
+    } else if SQLiteManager::is_v2(key_conn) {
+        let mgr = SQLiteManager::new_with_passwd(filepath, key_filepath, password)?;
+        Ok(mgr.get_all_items()?.unwrap_or_default())
+    } else {
+        Err("Not a valid VanillaPM database".into())
+    }
+}
+
 fn do_import(
     target_db: &str,
     target_key_db: &Option<String>,
@@ -227,23 +252,19 @@ fn do_import(
 ) -> Result<(), Box<dyn Error>> {
     use std::collections::HashSet;
 
-    println!("=== VanillaPM Import (v2 -> v2) ===");
+    println!("=== VanillaPM Import ===");
     println!("Source: {}", source_db);
     println!("Target: {}", target_db);
     println!();
 
-    // Open source database
-    let source_mgr = retry_guard(
+    // Open source database (supports v1 and v2)
+    let source_items = retry_guard(
         || {
             let source_pw = rpassword::prompt_password("Source database password>")?;
-            SQLiteManager::new_with_passwd(source_db, source_key_db, &source_pw)
+            read_all_from_any_db(source_db, source_key_db, &source_pw)
         },
         |_| "password error".to_string(),
     )?;
-
-    let source_items = source_mgr
-        .get_all_items()?
-        .unwrap_or_default();
     println!("Read {} items from source database.", source_items.len());
 
     if source_items.is_empty() {
@@ -303,25 +324,23 @@ fn do_diff(
     println!("B: {}", db_b);
     println!();
 
-    // Open database A
-    let mgr_a = retry_guard(
+    // Open database A (supports v1 and v2)
+    let items_a = retry_guard(
         || {
             let pw = rpassword::prompt_password("Password for A>")?;
-            SQLiteManager::new_with_passwd(db_a, key_db_a, &pw)
+            read_all_from_any_db(db_a, key_db_a, &pw)
         },
         |_| "password error".to_string(),
     )?;
-    let items_a = mgr_a.get_all_items()?.unwrap_or_default();
 
-    // Open database B
-    let mgr_b = retry_guard(
+    // Open database B (supports v1 and v2)
+    let items_b = retry_guard(
         || {
             let pw = rpassword::prompt_password("Password for B>")?;
-            SQLiteManager::new_with_passwd(db_b, key_db_b, &pw)
+            read_all_from_any_db(db_b, key_db_b, &pw)
         },
         |_| "password error".to_string(),
     )?;
-    let items_b = mgr_b.get_all_items()?.unwrap_or_default();
 
     // Build sets keyed by (site, account, password)
     let set_a: HashSet<(String, String, String)> = items_a

@@ -78,7 +78,7 @@ type KeySet = (
 );
 
 impl SQLiteManager {
-    fn is_v2(connection: &sqlite::Connection) -> bool {
+    pub fn is_v2(connection: &sqlite::Connection) -> bool {
         if let Ok(stmt) = connection.prepare("SELECT 1 FROM vanillapm WHERE s='vanillapm_v2'") {
             let mut cursor = stmt.into_cursor();
             if let Ok(row) = cursor.try_next() {
@@ -88,7 +88,7 @@ impl SQLiteManager {
         false
     }
 
-    fn is_legacy(connection: &sqlite::Connection) -> bool {
+    pub fn is_legacy(connection: &sqlite::Connection) -> bool {
         if let Ok(stmt) = connection.prepare("SELECT 1 FROM vanillapm WHERE s='vanillapm'") {
             let mut cursor = stmt.into_cursor();
             if let Ok(row) = cursor.try_next() {
